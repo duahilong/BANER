@@ -23,11 +23,15 @@ from peft import (
     prepare_model_for_kbit_training,
     set_peft_model_state_dict,
 )
-from transformers import LlamaForCausalLM, LlamaTokenizer, AutoTokenizer, AutoModelForCausalLM
+# 修改为使用 AutoModelForCausalLM 和 AutoTokenizer，以支持 Qwen1.5-7B 模型
+# 原来使用 LlamaForCausalLM 和 LlamaTokenizer 只支持 LLaMA 模型
+# Auto 类会自动识别模型类型并加载对应的实现
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from transformers import Trainer
-
-from transformers import DataCollatorForSeq2Seq
+from transformers import Trainer, DataCollatorForSeq2Seq
+from transformers.trainer_utils import is_peft_available
+from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
+from transformers.utils import unwrap_model
 
 from datasets import Dataset
 
@@ -334,19 +338,30 @@ def train(
     if len(wandb_log_model) > 0:
         os.environ["WANDB_LOG_MODEL"] = wandb_log_model
 
-    model = LlamaForCausalLM.from_pretrained(
-        "/data/guoquanjiang/transformers-code/pretrained_model/modelscope/Llama-2-7b-ms",
+    # 修改为使用 AutoModelForCausalLM 加载 Qwen1.5-7B 模型
+    # trust_remote_code=True 是必须的，因为 Qwen 使用了自定义的模型代码
+    # Qwen1.5-7B 是支持中英双语的大语言模型，相比 LLaMA-2 更适合中文任务
+    model = AutoModelForCausalLM.from_pretrained(
+        "./models/qwen1.5-7b",  # Qwen1.5-7B 模型路径，需要提前下载
         load_in_8bit=False,
         torch_dtype=torch.float16,
         device_map=device_map,
+        trust_remote_code=True  # 必须添加此参数以加载 Qwen 的自定义代码
     )
     set_seed(42, 0)
-    tokenizer = LlamaTokenizer.from_pretrained("/data/guoquanjiang/transformers-code/pretrained_model/modelscope/Llama-2-7b-ms")
-
-
-    tokenizer.pad_token_id = (
-        0  # unk. we want this to be different from the eos token
+    # 使用 AutoTokenizer 加载 Qwen 的 tokenizer，支持中文分词
+    # Qwen 的 tokenizer 包含完整的中文词表，能正确处理中文文本
+    tokenizer = AutoTokenizer.from_pretrained(
+        "./models/qwen1.5-7b",
+        trust_remote_code=True  # 同样需要添加此参数
     )
+
+
+    # 配置 Qwen tokenizer 的 pad_token
+    # Qwen 可能没有预定义 pad_token，需要手动设置
+    # 使用 eos_token 作为 pad_token 是常见做法，确保批次训练时序列长度一致
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"  # Allow batched inference
 
     def tokenize(prompt, add_eos_token=True):

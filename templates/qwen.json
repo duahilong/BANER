@@ -1,0 +1,6 @@
+{
+    "description": "中文提示词模板，用于 Qwen1.5-7B 模型的中文 NER 任务",
+    "prompt_input": "以下是一条描述任务的指令，以及提供进一步上下文的输入。请编写一个适当的响应来完成请求。\n\n### 指令:\n{instruction}\n\n### 输入:\n{input}\n\n### 响应:\n",
+    "prompt_no_input": "以下是一条描述任务的指令。请编写一个适当的响应来完成请求。\n\n### 指令:\n{instruction}\n\n### 响应:\n",
+    "response_split": "### 响应:"
+}

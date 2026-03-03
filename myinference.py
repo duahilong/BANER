@@ -5,7 +5,9 @@ import fire
 import torch
 import transformers
 from peft import PeftModel
-from transformers import GenerationConfig, LlamaForCausalLM, LlamaTokenizer
+# 修改为使用 AutoModelForCausalLM 和 AutoTokenizer，以支持 Qwen1.5-7B 模型
+# 原来使用 LlamaForCausalLM 和 LlamaTokenizer 只支持 LLaMA 模型
+from transformers import AutoModelForCausalLM, AutoTokenizer, GenerationConfig
 
 from utils.callbacks import Iteratorize, Stream
 from utils.prompter import Prompter
@@ -36,7 +38,9 @@ def remove_duplicates(lst):
 
 def main(
     load_8bit: bool = False,
-    base_model: str = "/data/guoquanjiang/transformers-code/pretrained_model/modelscope/Llama-2-7b-ms",
+    # 修改默认模型路径为 Qwen1.5-7B
+    # Qwen1.5-7B 是支持中英双语的大语言模型，适合中文 NER 任务
+    base_model: str = "./models/qwen1.5-7b",
     lora_weights: str = str(sys.argv[1]), #"./lora-alpaca" #"tloen/alpaca-lora-7b",
     prompt_template: str = "",  # The prompt template to use, will default to alpaca.
     server_name: str = "0.0.0.0",  # Allows to listen on all interfaces by providing '0.
@@ -48,13 +52,19 @@ def main(
     ), "Please specify a --base_model, e.g. --base_model='huggyllama/llama-7b'"
 
     prompter = Prompter(prompt_template)
-    tokenizer = LlamaTokenizer.from_pretrained(base_model)
+    # 使用 AutoTokenizer 加载 Qwen 的 tokenizer，支持中文分词
+    # Qwen 的 tokenizer 包含完整的中文词表，能正确处理中文文本
+    # trust_remote_code=True 是必须的，因为 Qwen 使用了自定义的 tokenizer 代码
+    tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
     if device == "cuda":
-        model = LlamaForCausalLM.from_pretrained(
+        # 使用 AutoModelForCausalLM 加载 Qwen1.5-7B 模型
+        # trust_remote_code=True 是必须的，因为 Qwen 使用了自定义的模型代码
+        model = AutoModelForCausalLM.from_pretrained(
             base_model,
             load_in_8bit=load_8bit,
             torch_dtype=torch.float16,
             device_map="auto",
+            trust_remote_code=True
         )
         model = PeftModel.from_pretrained(
             model,
@@ -62,10 +72,12 @@ def main(
             torch_dtype=torch.float16,
         )
     elif device == "mps":
-        model = LlamaForCausalLM.from_pretrained(
+        # MPS 设备（Apple Silicon）的模型加载
+        model = AutoModelForCausalLM.from_pretrained(
             base_model,
             device_map={"": device},
             torch_dtype=torch.float16,
+            trust_remote_code=True
         )
         model = PeftModel.from_pretrained(
             model,
@@ -74,8 +86,9 @@ def main(
             torch_dtype=torch.float16,
         )
     else:
-        model = LlamaForCausalLM.from_pretrained(
-            base_model, device_map={"": device}, low_cpu_mem_usage=True
+        # CPU 设备的模型加载
+        model = AutoModelForCausalLM.from_pretrained(
+            base_model, device_map={"": device}, low_cpu_mem_usage=True, trust_remote_code=True
         )
         model = PeftModel.from_pretrained(
             model,
@@ -83,10 +96,14 @@ def main(
             device_map={"": device},
         )
 
-    # unwind broken decapoda-research config
-    model.config.pad_token_id = tokenizer.pad_token_id = 0  # unk
-    model.config.bos_token_id = 1
-    model.config.eos_token_id = 2
+    # 配置 Qwen 模型的 token 相关参数
+    # Qwen 的 token_id 可能与 LLaMA 不同，需要使用 tokenizer 的实际配置
+    # 使用 hasattr 检查属性是否存在，避免某些模型没有 bos_token 的情况
+    model.config.pad_token_id = tokenizer.pad_token_id
+    if hasattr(model.config, 'bos_token_id'):
+        model.config.bos_token_id = tokenizer.bos_token_id
+    if hasattr(model.config, 'eos_token_id'):
+        model.config.eos_token_id = tokenizer.eos_token_id
 
     if not load_8bit:
         model.half()  # seems to fix bugs for some users.
