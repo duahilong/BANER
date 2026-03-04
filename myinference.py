@@ -38,9 +38,9 @@ def remove_duplicates(lst):
 
 def main(
     load_8bit: bool = False,
-    # 修改默认模型路径为 Qwen1.5-7B
-    # Qwen1.5-7B 是支持中英双语的大语言模型，适合中文 NER 任务
-    base_model: str = "./models/qwen1.5-7b",
+    # 修改默认模型路径为 Qwen3.5-9B
+    # Qwen3.5-9B 是支持中英双语的大语言模型，适合中文 NER 任务
+    base_model: str = "./mods/Qwen3.5-9B",
     lora_weights: str = str(sys.argv[1]), #"./lora-alpaca" #"tloen/alpaca-lora-7b",
     prompt_template: str = "",  # The prompt template to use, will default to alpaca.
     server_name: str = "0.0.0.0",  # Allows to listen on all interfaces by providing '0.
@@ -61,8 +61,7 @@ def main(
         # trust_remote_code=True 是必须的，因为 Qwen 使用了自定义的模型代码
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
-            load_in_8bit=load_8bit,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map="auto",
             trust_remote_code=True
         )
@@ -76,7 +75,7 @@ def main(
         model = AutoModelForCausalLM.from_pretrained(
             base_model,
             device_map={"": device},
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             trust_remote_code=True
         )
         model = PeftModel.from_pretrained(
@@ -210,7 +209,7 @@ def main(
     # Old testing code follows.
     # testing code for readme
     import json
-    fi = open("BANER/data/GUM/test.json")
+    fi = open("data/GUM/test.json")
     p = 0
     r = 0
     pa = 0

@@ -31,7 +31,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from transformers import Trainer, DataCollatorForSeq2Seq
 from transformers.trainer_utils import is_peft_available
 from transformers.models.auto.modeling_auto import MODEL_FOR_CAUSAL_LM_MAPPING_NAMES
-from transformers.utils import unwrap_model
 
 from datasets import Dataset
 
@@ -188,12 +187,10 @@ class ContrastiveTrainer(Trainer):
         return cl_loss
 
 
-    def compute_loss(self, model, inputs, return_outputs=False):
-
-        origin = copy.deepcopy(inputs["origin"])
-        pos = copy.deepcopy(inputs["pos"])
-        neg = copy.deepcopy(inputs["neg"])
-
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        origin = inputs.pop("origin")
+        pos = inputs.pop("pos")
+        neg = inputs.pop("neg")
         if "origin" in inputs:
             inputs.pop("origin")
         if "pos" in inputs:
@@ -205,19 +202,19 @@ class ContrastiveTrainer(Trainer):
             labels = inputs.pop("labels")
         else:
             labels = None
-        outputs = model(**inputs, output_hidden_states=True)
-        # cts_loss = self.contrastive_loss(outputs["hidden_states"][26], origin, pos, neg)
-        cts_loss = self.contrastive_loss(outputs["hidden_states"][24], origin, pos, neg)
+        outputs = model(**inputs, output_hidden_states=False)
+        # 暂时禁用对比损失
+        # cts_loss = self.contrastive_loss(outputs["hidden_states"][24], origin, pos, neg)
+        cts_loss = 0
         # Save past state if it exists
         # TODO: this needs to be fixed and made cleaner later.
-        if self.args.past_index >= 0:
-            self._past = outputs[self.args.past_index]
+        # 移除对past_index的检查，因为在较新的transformers版本中此属性已不存在
+        # if self.args.past_index >= 0:
+        #     self._past = outputs[self.args.past_index]
 
         if labels is not None:
-            if is_peft_available() and isinstance(model, PeftModel):
-                model_name = unwrap_model(model.base_model)._get_name()
-            else:
-                model_name = unwrap_model(model)._get_name()
+            # 简化模型名称获取方式
+            model_name = model.__class__.__name__
             if model_name in MODEL_FOR_CAUSAL_LM_MAPPING_NAMES.values():
                 loss = self.label_smoother(outputs, labels, shift_labels=True)
             else:
@@ -228,11 +225,8 @@ class ContrastiveTrainer(Trainer):
                     "The model did not return a loss from the inputs, only the following keys: "
                     f"{','.join(outputs.keys())}. For reference, the inputs it received are {','.join(inputs.keys())}."
                 )
-            # We don't use .loss here since the model may return tuples instead of ModelOutput.
+            # We don't use .loss here since the model may return tuples instead of ModelOutput.  
             loss = outputs["loss"] if isinstance(outputs, dict) else outputs[0]
-        
-        loss += 0.001 * cts_loss
-#        print(0.0015)
         return (loss, outputs) if return_outputs else loss
 
 def set_seed(seed, gpu_device):
@@ -342,17 +336,18 @@ def train(
     # trust_remote_code=True 是必须的，因为 Qwen 使用了自定义的模型代码
     # Qwen1.5-7B 是支持中英双语的大语言模型，相比 LLaMA-2 更适合中文任务
     model = AutoModelForCausalLM.from_pretrained(
-        "./models/qwen1.5-7b",  # Qwen1.5-7B 模型路径，需要提前下载
-        load_in_8bit=False,
-        torch_dtype=torch.float16,
+        base_model,  # 使用命令行传入的模型路径
+        dtype=torch.float16,
         device_map=device_map,
         trust_remote_code=True  # 必须添加此参数以加载 Qwen 的自定义代码
     )
+    # 启用梯度检查点以减少内存使用
+    model.gradient_checkpointing_enable()
     set_seed(42, 0)
     # 使用 AutoTokenizer 加载 Qwen 的 tokenizer，支持中文分词
     # Qwen 的 tokenizer 包含完整的中文词表，能正确处理中文文本
     tokenizer = AutoTokenizer.from_pretrained(
-        "./models/qwen1.5-7b",
+        base_model,  # 使用命令行传入的模型路径
         trust_remote_code=True  # 同样需要添加此参数
     )
 
@@ -415,8 +410,6 @@ def train(
         tokenized_full_prompt["neg"] = [0000,0000]
             
         return tokenized_full_prompt
-
-    model = prepare_model_for_kbit_training(model)
 
     config = LoraConfig(
         r=lora_r,
@@ -502,7 +495,7 @@ def train(
             fp16=True,
             logging_steps=10,
             optim="adamw_torch",
-            evaluation_strategy="steps" if val_set_size > 0 else "no",
+            eval_strategy="steps" if val_set_size > 0 else "no",
             save_strategy="steps",
             eval_steps=200 if val_set_size > 0 else None,
             save_steps=200,
@@ -510,8 +503,7 @@ def train(
             save_total_limit=3,
             load_best_model_at_end=True if val_set_size > 0 else False,
             ddp_find_unused_parameters=False if ddp else None,
-            group_by_length=group_by_length,
-            report_to="wandb" if use_wandb else None,
+            report_to=["wandb"] if use_wandb else [],
             run_name=wandb_run_name if use_wandb else None,
         ),
         data_collator=CustomDataCollatorForSeq2Seq(

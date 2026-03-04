@@ -1,0 +1,8 @@
+{
+    "description": "BANER Stage I: 中文边界感知片段检测 (类别无关)。",
+    "prompt_input": "下方是一条描述任务的指令，以及提供了更多上下文的输入文本。请完成请求，识别并输出文本中所有潜在的实体片段及其索引。\n\n### Instruction:\n{instruction}\n\n### Input:\n{input}\n\n### Response:\n",
+    "prompt_no_input": "下方是一条描述任务的指令。请完成请求，识别并输出文本中所有潜在的实体片段及其索引。\n\n### Instruction:\n{instruction}\n\n### Response:\n",
+    "response_split": "### Response:",
+    "instruction_cn": "请忽略实体类型，仅关注文本中所有潜在的命名实体片段。将识别出的片段以结构化索引 (起始和结束位置) 形式输出。",
+    "instruction_en": "Identify all potential entity spans in the text, ignoring their entity types. Output the identified spans in a structured index (start and end position) format."
+}

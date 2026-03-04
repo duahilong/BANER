@@ -49,8 +49,13 @@ Thumbs.db
 *.log
 
 # Data
-data/
 models/
 *.jsonl
 *.txt
 !requirements.txt
+
+# Local mods (model files - do not upload)
+mods/
+lora_finetune*/
+output/
+checkpoint-*/
